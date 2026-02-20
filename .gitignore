@@ -1,0 +1,30 @@
+# Secrets — never commit
+soc-project/.env
+
+# Generated data & logs
+soc-project/data/
+soc-project/logs/
+soc-project/certs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Docker overrides
+docker-compose.override.yml
