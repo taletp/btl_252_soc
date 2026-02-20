@@ -1,0 +1,45 @@
+# Logstash Configuration
+# Reference: https://www.elastic.co/guide/en/logstash/current/configuration.html
+
+# Pipeline Settings
+pipeline.workers: 2
+pipeline.batch.size: 125
+pipeline.batch.delay: 50
+pipeline.ordered: auto
+
+# Monitoring
+xpack.monitoring.enabled: true
+xpack.monitoring.elasticsearch.username: logstash_system
+xpack.monitoring.elasticsearch.password: "${LOGSTASH_PASSWORD}"
+xpack.monitoring.elasticsearch.hosts: ["https://elasticsearch:9200"]
+xpack.monitoring.elasticsearch.ssl.certificate_authority: /usr/share/logstash/config/certs/ca.crt
+
+# Queue Settings
+queue.type: memory
+
+# Dead Letter Queue
+dead_letter_queue.enable: false
+
+# Settings file location
+path.settings: /usr/share/logstash/config
+
+# Pipeline configuration path
+path.config: /usr/share/logstash/pipeline
+
+# Data directory
+path.data: /usr/share/logstash/data
+
+# Logs directory
+path.logs: /usr/share/logstash/logs
+
+# JVM Settings (set via environment variable LS_JAVA_OPTS)
+# LS_JAVA_OPTS="-Xmx1g -Xms1g"
+
+# Modules
+modules:
+  - name: netflow
+    var.input.udp.port: 2055
+
+# Cloud settings (if using Elastic Cloud)
+# cloud.id: ""
+# cloud.auth: ""

@@ -1,0 +1,115 @@
+# Filebeat Configuration
+# Reference: https://www.elastic.co/guide/en/beats/filebeat/current/filebeat-reference-yml.html
+
+#=========================== Filebeat Inputs =============================
+filebeat.inputs:
+# Suricata EVE JSON logs
+- type: log
+  enabled: true
+  paths:
+    - /var/log/suricata/eve.json
+  json.keys_under_root: true
+  json.add_error_key: true
+  tags: ["suricata", "ids"]
+  fields:
+    service: suricata
+    type: ids_alert
+
+# Wazuh alerts
+- type: log
+  enabled: true
+  paths:
+    - /var/log/wazuh/alerts/alerts.json
+  json.keys_under_root: true
+  tags: ["wazuh", "siem"]
+  fields:
+    service: wazuh
+    type: security_alert
+
+# Wazuh archives
+- type: log
+  enabled: true
+  paths:
+    - /var/log/wazuh/archives/archives.json
+  json.keys_under_root: true
+  tags: ["wazuh", "archive"]
+  fields:
+    service: wazuh
+    type: archive
+
+#=========================== Filebeat Modules ===========================
+filebeat.config.modules:
+  path: ${path.config}/modules.d/*.yml
+  reload.enabled: false
+
+#=========================== Elasticsearch Template Setting ===========================
+setup.template.settings:
+  index.number_of_shards: 1
+  index.number_of_replicas: 0
+  index.codec: best_compression
+
+#=========================== Setup Dashboards ===========================
+setup.dashboards.enabled: true
+
+#=========================== Setup Kibana ===========================
+setup.kibana:
+  host: "http://kibana:5601"
+  username: "${ELASTICSEARCH_USERNAME}"
+  password: "${ELASTICSEARCH_PASSWORD}"
+
+#=========================== Outputs ===========================
+# Configure what output to use when sending the data collected by the beat
+
+#-------------------------- Elasticsearch Output --------------------------
+output.elasticsearch:
+  enabled: true
+  hosts: ["https://elasticsearch:9200"]
+  username: "${ELASTICSEARCH_USERNAME}"
+  password: "${ELASTICSEARCH_PASSWORD}"
+  ssl.certificate_authorities: ["/usr/share/filebeat/config/certs/ca.crt"]
+  ssl.verification_mode: certificate
+  
+  # Indices configuration
+  indices:
+    - index: "suricata-ids-%{+yyyy.MM.dd}"
+      when.contains:
+        tags: "suricata"
+    
+    - index: "wazuh-alerts-%{+yyyy.MM.dd}"
+      when.contains:
+        tags: "wazuh"
+
+#=========================== Processors ===========================
+processors:
+  - add_host_metadata:
+      when.not.contains.tags: forwarded
+  - add_cloud_metadata: ~
+  - add_docker_metadata: ~
+  - add_locale: ~
+  - decode_json_fields:
+      fields: ["message"]
+      target: ""
+      overwrite_keys: true
+      when:
+        has_fields: ['message']
+
+#=========================== Logging ===========================
+logging.level: info
+logging.to_files: true
+logging.files:
+  path: /usr/share/filebeat/logs
+  name: filebeat
+  keepfiles: 7
+  permissions: 0644
+
+#=========================== Monitoring ===========================
+monitoring.enabled: false
+
+#=========================== Queue ===========================
+queue.mem:
+  events: 4096
+  flush.min_events: 512
+  flush.timeout: 5s
+
+#=========================== HTTP Endpoint for Monitoring ===========================
+http.enabled: false

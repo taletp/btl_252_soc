@@ -1,0 +1,22 @@
+# Kibana Configuration
+# Reference: https://www.elastic.co/guide/en/kibana/current/settings.html
+
+# Server Settings
+server.name: kibana
+server.host: "0.0.0.0"
+server.port: 5601
+
+# Elasticsearch Connection
+elasticsearch.hosts: ["https://elasticsearch:9200"]
+elasticsearch.ssl.certificateAuthorities: ["/usr/share/kibana/config/certs/ca.crt"]
+elasticsearch.ssl.verificationMode: certificate
+
+# Logging
+logging.root:
+  level: info
+
+# Path settings
+path.data: /usr/share/kibana/data
+
+# i18n
+i18n.locale: "en"

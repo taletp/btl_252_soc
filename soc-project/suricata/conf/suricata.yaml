@@ -1,0 +1,341 @@
+# Suricata configuration file
+# Reference: https://suricata.readthedocs.io/
+
+%YAML 1.1
+---
+# Suricata version
+vars:
+  # The address groups
+  address-groups:
+    HOME_NET: "[192.168.0.0/16,10.0.0.0/8,172.16.0.0/12]"
+    EXTERNAL_NET: "!$HOME_NET"
+    HTTP_SERVERS: "$HOME_NET"
+    SMTP_SERVERS: "$HOME_NET"
+    SQL_SERVERS: "$HOME_NET"
+    DNS_SERVERS: "$HOME_NET"
+    TELNET_SERVERS: "$HOME_NET"
+    AIM_SERVERS: "$EXTERNAL_NET"
+    DC_SERVERS: "$HOME_NET"
+    DNP3_SERVER: "$HOME_NET"
+    DNP3_CLIENT: "$HOME_NET"
+    MODBUS_CLIENT: "$HOME_NET"
+    MODBUS_SERVER: "$HOME_NET"
+    ENIP_CLIENT: "$HOME_NET"
+    ENIP_SERVER: "$HOME_NET"
+
+  # The port groups
+  port-groups:
+    HTTP_PORTS: "80"
+    SHELLCODE_PORTS: "!80"
+    ORACLE_PORTS: 1521
+    SSH_PORTS: 22
+    DNP3_PORTS: 20000
+    MODBUS_PORTS: 502
+    FILE_DATA_PORTS: "[$HTTP_PORTS,110,143]"
+    FTP_PORTS: 21
+    GENEVE_PORTS: 6081
+    VXLAN_PORTS: 4789
+    TEREDO_PORTS: 3544
+
+# Configure the default logging directory
+default-log-dir: /var/log/suricata
+
+# Global stats configuration
+stats:
+  enabled: yes
+  interval: 8
+  decoder-events: true
+  decoder-events-prefix: "decoder.event"
+  stream-events: false
+
+# Configure the type of alert (and other) logging you want
+outputs:
+  # a line based alerts log similar to Snort's fast.log
+  - fast:
+      enabled: yes
+      filename: fast.log
+      append: yes
+      filetype: regular # 'regular', 'unix_stream' or 'unix_dgram'
+
+  # Extensible Event Format (nicknamed EVE) event log in JSON format
+  - eve-log:
+      enabled: yes
+      filetype: regular #regular|syslog|unix_dgram|unix_stream|redis
+      filename: eve.json
+      types:
+        - alert:
+            payload: yes             # enable dumping payload in Base64
+            payload-buffer-size: 4kb # max size of payload buffer to output in eve-log
+            payload-printable: yes   # enable dumping payload in printable (lossy) format
+            packet: yes              # enable dumping of packet (without stream segments)
+            http-body: yes           # enable dumping of http body in Base64
+            http-body-printable: yes # enable dumping of http body in printable format
+            metadata: yes            # enable inclusion of app layer metadata with alert
+            tagged-packets: yes
+            xff:
+              enabled: no
+              mode: extra-data
+              deployment: reverse
+              header: X-Forwarded-For
+        - http:
+            extended: yes
+            dump-all-headers: both
+        - dns:
+            enabled: yes
+            version: 2
+            requests: yes
+            responses: yes
+        - tls:
+            extended: yes
+            session-resumption: yes
+        - files:
+            force-magic: no
+            force-hash: [md5, sha256]
+        - smtp:
+            extended: yes
+            custom: [received, x-mailer, x-originating-ip, reply-to]
+        - ssh
+        - stats:
+            totals: yes
+            threads: no
+            deltas: no
+        - flow
+        - netflow
+
+  # unified2 alert format for use with Barnyard2
+  - unified2-alert:
+      enabled: no
+
+  # a line based log of HTTP requests (no alerts)
+  - http-log:
+      enabled: no
+      filename: http.log
+      append: yes
+
+  # a line based log of TLS handshake parameters (no alerts)
+  - tls-log:
+      enabled: no
+      filename: tls.log
+      append: yes
+
+  # a line based log of DNS requests and/or replies (no alerts)
+  - dns-log:
+      enabled: no
+      filename: dns.log
+      append: yes
+
+  # a line based log of SMTP requests and/or replies (no alerts)
+  - smtp-log:
+      enabled: no
+      filename: smtp.log
+      append: yes
+
+  # a line based log of SSH requests and/or replies (no alerts)
+  - ssh-log:
+      enabled: no
+      filename: ssh.log
+      append: yes
+
+  # a line based log of TCP session parameters (no alerts)
+  - tcp-data:
+      enabled: no
+
+  # a line based log of IPv4 and IPv6 packets (no alerts)
+  - ip-json-log:
+      enabled: no
+
+  # a line based log of PCAP data
+  - pcap-log:
+      enabled: no
+
+# Logging configuration
+logging:
+  default-log-level: notice
+  outputs:
+  - console:
+      enabled: yes
+  - file:
+      enabled: yes
+      level: info
+      filename: /var/log/suricata/suricata.log
+  - syslog:
+      enabled: no
+
+# Capture settings
+af-packet:
+  - interface: eth0
+    cluster-id: 99
+    cluster-type: cluster_flow
+    defrag: yes
+    use-mmap: yes
+    tpacket-v3: yes
+    ring-size: 200000
+    block-size: 32768
+    block-timeout: 10
+    use-emergency-flush: yes
+    buffer-size: 32768
+    checksum-checks: kernel
+    bpf-filter: tcp or udp or icmp
+
+# Cross platform libpcap capture support
+pcap:
+  - interface: eth0
+    checksum-checks: auto
+    bpf-filter: "tcp or udp or icmp"
+
+# Settings for reading pcap files
+pcap-file:
+  checksum-checks: auto
+
+# App Layer Protocols
+app-layer:
+  protocols:
+    tls:
+      enabled: yes
+      detection-ports:
+        dp: 443
+      ja3-fingerprints: yes
+
+    dcerpc:
+      enabled: yes
+
+    ftp:
+      enabled: yes
+
+    ssh:
+      enabled: yes
+
+    smtp:
+      enabled: yes
+      mime:
+        decode-mime: yes
+        decode-base64: yes
+        decode-quoted-printable: yes
+        header-value-depth: 2000
+        extract-urls: yes
+        body-md5: no
+      inspected-tracker:
+        content-limit: 100000
+        content-inspect-min-size: 32768
+        content-inspect-window: 4096
+
+    imap:
+      enabled: detection-only
+
+    msn:
+      enabled: detection-only
+
+    smb:
+      enabled: yes
+      detection-ports:
+        dp: 139, 445
+
+    nfs:
+      enabled: yes
+
+    tftp:
+      enabled: yes
+
+    dns:
+      enabled: yes
+      request-flood-limit: 500
+      tcp-assembly: yes
+
+    http:
+      enabled: yes
+      libhtp:
+         default-config:
+           personality: IDS
+           request-body-limit: 100kb
+           response-body-limit: 100kb
+           request-body-minimal-inspect-size: 32kb
+           request-body-inspect-window: 4kb
+           response-body-minimal-inspect-size: 40kb
+           response-body-inspect-window: 16kb
+           double-decode-path: no
+           double-decode-query: no
+
+    modbus:
+      enabled: no
+
+    dnp3:
+      enabled: no
+
+    enip:
+      enabled: no
+
+    ntp:
+      enabled: yes
+
+    dhcp:
+      enabled: yes
+
+# Host specific settings
+host-mode: auto
+
+# Run Suricata as specific user and group
+run-as:
+  user: suricata
+  group: suricata
+
+# PID file
+pid-file: /var/run/suricata.pid
+
+# Daemonize Suricata
+daemonize: no
+
+# Suricata rules file
+# The default path is /etc/suricata/rules/
+default-rule-path: /etc/suricata/rules
+rule-files:
+  - botcc.rules
+  - ciarmy.rules
+  - compromised.rules
+  - drop.rules
+  - dshield.rules
+  - emerging-attack_response.rules
+  - emerging-chat.rules
+  - emerging-current_events.rules
+  - emerging-dns.rules
+  - emerging-dos.rules
+  - emerging-exploit.rules
+  - emerging-ftp.rules
+  - emerging-games.rules
+  - emerging-icmp_info.rules
+  - emerging-icmp.rules
+  - emerging-imap.rules
+  - emerging-malware.rules
+  - emerging-misc.rules
+  - emerging-mobile_malware.rules
+  - emerging-netbios.rules
+  - emerging-p2p.rules
+  - emerging-policy.rules
+  - emerging-pop3.rules
+  - emerging-rpc.rules
+  - emerging-scan.rules
+  - emerging-shellcode.rules
+  - emerging-smtp.rules
+  - emerging-snmp.rules
+  - emerging-sql.rules
+  - emerging-telnet.rules
+  - emerging-tftp.rules
+  - emerging-trojan.rules
+  - emerging-user_agents.rules
+  - emerging-voip.rules
+  - emerging-web_client.rules
+  - emerging-web_server.rules
+  - emerging-web_specific_apps.rules
+  - emerging-worm.rules
+  - tor.rules
+
+# Classifications
+classification-file: /etc/suricata/classification.config
+
+# References
+reference-config-file: /etc/suricata/reference.config
+
+# Thresholding
+threshold-file: /etc/suricata/threshold.config
+
+# Include custom configuration files
+# include: /etc/suricata/suricata-custom.yaml

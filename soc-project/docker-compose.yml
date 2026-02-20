@@ -1,0 +1,243 @@
+networks:
+  soc-net:
+    external: true
+    name: ${NETWORK_NAME}
+
+volumes:
+  elasticsearch-data:
+    driver: local
+  wazuh-data:
+    driver: local
+  wazuh-etc:
+    driver: local
+  suricata-logs:
+    driver: local
+  signature-keys:
+    driver: local
+
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTIC_VERSION}
+    container_name: soc-elasticsearch
+    hostname: elasticsearch
+    environment:
+      - node.name=elasticsearch
+      - cluster.name=soc-cluster
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=${ES_JAVA_OPTS}"
+      - xpack.security.enabled=${ELASTIC_SECURITY_ENABLED}
+      - xpack.security.http.ssl.enabled=true
+      - xpack.security.http.ssl.key=/usr/share/elasticsearch/config/certs/elasticsearch.key
+      - xpack.security.http.ssl.certificate=/usr/share/elasticsearch/config/certs/elasticsearch.crt
+      - xpack.security.http.ssl.certificate_authorities=/usr/share/elasticsearch/config/certs/ca.crt
+      - xpack.security.transport.ssl.enabled=true
+      - xpack.security.transport.ssl.key=/usr/share/elasticsearch/config/certs/elasticsearch.key
+      - xpack.security.transport.ssl.certificate=/usr/share/elasticsearch/config/certs/elasticsearch.crt
+      - xpack.security.transport.ssl.certificate_authorities=/usr/share/elasticsearch/config/certs/ca.crt
+      - ELASTIC_PASSWORD=${ELASTICSEARCH_PASSWORD}
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+      - ${DATA_PATH}/elasticsearch:/usr/share/elasticsearch/backup
+      - ${LOGS_PATH}/elasticsearch:/usr/share/elasticsearch/logs
+      - ${TLS_CERT_PATH}:/usr/share/elasticsearch/config/certs:ro
+    ports:
+      - "127.0.0.1:${ELASTICSEARCH_PORT}:9200"
+    networks:
+      - soc-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -k -u elastic:${ELASTICSEARCH_PASSWORD} https://localhost:9200/_cluster/health | grep -qv '\"status\":\"red\"' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:${ELASTIC_VERSION}
+    container_name: soc-kibana
+    hostname: kibana
+    environment:
+      - SERVERNAME=kibana
+      - ELASTICSEARCH_HOSTS=https://${ELASTICSEARCH_HOST}:${ELASTICSEARCH_PORT}
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${KIBANA_SYSTEM_PASSWORD}
+      - ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES=/usr/share/kibana/config/certs/ca.crt
+      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY}
+      - XPACK_SECURITY_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY}
+      - XPACK_REPORTING_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY}
+      - SERVER_PUBLICBASEURL=http://localhost:${KIBANA_PORT}
+    volumes:
+      - ./elk/config/kibana.yml:/usr/share/kibana/config/kibana.yml:ro
+      - ${LOGS_PATH}/kibana:/usr/share/kibana/logs
+      - ${TLS_CERT_PATH}/ca.crt:/usr/share/kibana/config/certs/ca.crt:ro
+    ports:
+      - "${KIBANA_PORT}:5601"
+    networks:
+      - soc-net
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -I http://localhost:5601 | grep -q 'HTTP/1.1 302 Found'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  wazuh-manager:
+    image: wazuh/wazuh-manager:${WAZUH_VERSION}
+    container_name: soc-wazuh-manager
+    hostname: wazuh-manager
+    environment:
+      - INDEXER_URL=https://${ELASTICSEARCH_HOST}:${ELASTICSEARCH_PORT}
+      - INDEXER_USERNAME=${ELASTICSEARCH_USERNAME}
+      - INDEXER_PASSWORD=${ELASTICSEARCH_PASSWORD}
+      - API_USERNAME=${WAZUH_ADMIN_USER}
+      - API_PASSWORD=${WAZUH_ADMIN_PASSWORD}
+    volumes:
+      - wazuh-data:/var/ossec/data
+      - ./wazuh/conf/ossec.conf:/var/ossec/etc/ossec.conf
+      - ./wazuh/shared:/var/ossec/etc/shared
+      - ${LOGS_PATH}/wazuh:/var/ossec/logs
+      - ${LOGS_PATH}/suricata:/var/log/suricata:ro
+      - ${TLS_CERT_PATH}/ca.crt:/var/ossec/etc/certs/ca.crt:ro
+    ports:
+      - "127.0.0.1:${WAZUH_API_PORT}:55000"
+      - "${WAZUH_REGISTRATION_PORT}:1514/tcp"
+      - "1514:1514/udp"
+      - "1515:1515"
+      - "514:514/udp"
+      - "1516:1516"
+    networks:
+      - soc-net
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "/var/ossec/bin/wazuh-control status | grep -q 'wazuh-modulesd is running'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  wazuh-dashboard:
+    image: wazuh/wazuh-dashboard:${WAZUH_VERSION}
+    container_name: soc-wazuh-dashboard
+    hostname: wazuh-dashboard
+    environment:
+      - OPENSEARCH_HOSTS=https://elasticsearch:9200
+      - INDEXER_USERNAME=${ELASTICSEARCH_USERNAME}
+      - INDEXER_PASSWORD=${ELASTICSEARCH_PASSWORD}
+      - WAZUH_API_URL=https://wazuh-manager:${WAZUH_API_PORT}
+      - DASHBOARD_USERNAME=${ELASTICSEARCH_USERNAME}
+      - DASHBOARD_PASSWORD=${ELASTICSEARCH_PASSWORD}
+      - API_USERNAME=${WAZUH_ADMIN_USER}
+      - API_PASSWORD=${WAZUH_ADMIN_PASSWORD}
+    volumes:
+      - ${LOGS_PATH}/wazuh-dashboard:/usr/share/wazuh-dashboard/logs
+      - ./config/opensearch_dashboards.yml:/usr/share/wazuh-dashboard/config/opensearch_dashboards.yml:ro
+    ports:
+      - "443:5601"
+    networks:
+      - soc-net
+    depends_on:
+      wazuh-manager:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -XGET https://localhost:5601/api/status -k | grep -q '\"state\":\"green\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+  suricata:
+    image: jasonish/suricata:${SURICATA_VERSION}
+    container_name: soc-suricata
+    hostname: suricata
+    cap_add:
+      - NET_ADMIN
+      - SYS_NICE
+      - NET_RAW
+    environment:
+      - SURICATA_OPTIONS=-i eth0
+    volumes:
+      - ./suricata/conf/suricata.yaml:/etc/suricata/suricata.yaml
+      - ./suricata/conf/rules:/etc/suricata/rules
+      - suricata-logs:/var/log/suricata
+      - ${LOGS_PATH}/suricata:/var/log/suricata
+      - ${DATA_PATH}/suricata:/var/lib/suricata
+    command: ["-i", "eth0", "-v"]
+    networks:
+      - soc-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f suricata || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:${ELASTIC_VERSION}
+    container_name: soc-filebeat
+    hostname: filebeat
+    user: root
+    environment:
+      - ELASTICSEARCH_HOST=${ELASTICSEARCH_HOST}
+      - ELASTICSEARCH_PORT=${ELASTICSEARCH_PORT}
+      - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_USERNAME}
+      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD}
+      - KIBANA_HOST=kibana
+      - KIBANA_PORT=${KIBANA_PORT}
+    volumes:
+      - ./elk/config/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - ${TLS_CERT_PATH}/ca.crt:/usr/share/filebeat/config/certs/ca.crt:ro
+      - ${LOGS_PATH}/suricata:/var/log/suricata:ro
+      - ${LOGS_PATH}/wazuh:/var/log/wazuh:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: filebeat -e -strict.perms=false
+    networks:
+      - soc-net
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      kibana:
+        condition: service_healthy
+      suricata:
+        condition: service_started
+    restart: unless-stopped
+
+  signature-service:
+    build:
+      context: ./signature-service
+    container_name: soc-signature-service
+    hostname: signature-service
+    environment:
+      - HMAC_SECRET=${HMAC_SECRET:-soc-hmac-secret-key-2024}
+      - KEYS_DIR=/app/keys
+    volumes:
+      - signature-keys:/app/keys
+    ports:
+      - "127.0.0.1:5000:5000"
+    networks:
+      - soc-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/health')\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
